@@ -2,23 +2,30 @@
 
 import * as React from "react";
 import {
-  Activity,
   CalendarDays,
   Download,
   Droplets,
+  Loader2,
   RefreshCw,
   Thermometer,
-  Wind,
-  XCircle,
+  WifiOff,
 } from "lucide-react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import {
   Table,
   TableBody,
@@ -28,14 +35,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-type Measurement = {
-  timestamp: string;
-  pm25: number;
-  temperature: number;
-  humidity: number;
-  co2: number;
-};
+import {
+  useRealtimeSensor,
+  type SensorReading,
+} from "@/hooks/useRealtimeSensor";
 
+/* ─────────────────────────────────────────────────────────────
+   Date helpers
+───────────────────────────────────────────────────────────── */
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -44,20 +51,21 @@ function toDateInputValue(d: Date) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-function parseDateInputToRangeStart(dateStr: string) {
+function parseDateInputToRangeStart(dateStr: string): Date | null {
   const [y, m, d] = dateStr.split("-").map(Number);
   if (!y || !m || !d) return null;
   return new Date(y, m - 1, d, 0, 0, 0, 0);
 }
 
-function parseDateInputToRangeEnd(dateStr: string) {
+function parseDateInputToRangeEnd(dateStr: string): Date | null {
   const [y, m, d] = dateStr.split("-").map(Number);
   if (!y || !m || !d) return null;
   return new Date(y, m - 1, d, 23, 59, 59, 999);
 }
 
-function formatDateTimeID(iso: string) {
-  return new Date(iso).toLocaleString("id-ID", {
+function formatDateTimeID(ts: string | number) {
+  const d = typeof ts === "number" ? new Date(ts) : new Date(ts);
+  return d.toLocaleString("id-ID", {
     year: "numeric",
     month: "short",
     day: "2-digit",
@@ -66,112 +74,14 @@ function formatDateTimeID(iso: string) {
   });
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
+function formatTimeShort(ts: string | number) {
+  const d = typeof ts === "number" ? new Date(ts) : new Date(ts);
+  return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
 
-/* ── LINE CHART ─────────────────────────────── */
-function LineChart({
-  data,
-  valueKey,
-  height = 160,
-  color = "text-sky-500",
-}: {
-  data: Measurement[];
-  valueKey: keyof Pick<Measurement, "pm25" | "temperature" | "humidity" | "co2">;
-  height?: number;
-  color?: string;
-}) {
-  const W = 720;
-
-  const values = React.useMemo(() => data.map((d) => Number(d[valueKey])), [data, valueKey]);
-
-  const { minV, maxV } = React.useMemo(() => {
-    if (values.length === 0) return { minV: 0, maxV: 1 };
-    let lo = values[0], hi = values[0];
-    for (const v of values) { if (v < lo) lo = v; if (v > hi) hi = v; }
-    const pad = (hi - lo) * 0.14 || 1;
-    return { minV: lo - pad, maxV: hi + pad };
-  }, [values]);
-
-  const pts = React.useMemo(() => {
-    if (data.length === 0) return [];
-    const n = data.length;
-    const l = 16, r = W - 10, t = 8, b = height - 16;
-    return values.map((v, i) => ({
-      x: n === 1 ? (l + r) / 2 : l + (i * (r - l)) / (n - 1),
-      y: b - ((v - minV) / (maxV - minV || 1)) * (b - t),
-    }));
-  }, [data.length, values, minV, maxV, height]);
-
-  const pathD = React.useMemo(() => {
-    if (pts.length === 0) return "";
-    let d = `M ${pts[0].x} ${pts[0].y}`;
-    for (let i = 1; i < pts.length; i++) {
-      const p = pts[i - 1], c = pts[i];
-      const mx = (p.x + c.x) / 2, my = (p.y + c.y) / 2;
-      d += ` Q ${p.x} ${p.y} ${mx} ${my}`;
-    }
-    const last = pts[pts.length - 1];
-    d += ` T ${last.x} ${last.y}`;
-    return d;
-  }, [pts]);
-
-  const areaD = React.useMemo(() => {
-    if (!pathD || pts.length === 0) return "";
-    const b = height - 16;
-    return `${pathD} L ${pts[pts.length - 1].x} ${b} L ${pts[0].x} ${b} Z`;
-  }, [pathD, pts, height]);
-
-  if (data.length === 0) {
-    return (
-      <div className="grid h-40 place-items-center rounded-xl bg-slate-50 text-sm text-slate-400">
-        Tidak ada data pada range tanggal ini.
-      </div>
-    );
-  }
-
-  return (
-    <svg
-      viewBox={`0 0 ${W} ${height}`}
-      className={cn("w-full", color)}
-      style={{ height }}
-      role="img"
-      aria-label="Line chart"
-    >
-      <defs>
-        <linearGradient id={`g-${valueKey}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="currentColor" stopOpacity="0.18" />
-          <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <g className="text-slate-200">
-        {[0.2, 0.4, 0.6, 0.8].map((r, i) => (
-          <line key={i} x1="0" y1={height * r} x2={W} y2={height * r}
-            stroke="currentColor" strokeWidth="1" />
-        ))}
-      </g>
-      <path d={areaD} fill={`url(#g-${valueKey})`} />
-      <path d={pathD} fill="none" stroke="currentColor" strokeWidth="2.5"
-        strokeLinejoin="round" strokeLinecap="round" />
-      {pts.length > 0 && (
-        <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y}
-          r="5" fill="currentColor" opacity="0.9" />
-      )}
-    </svg>
-  );
-}
-
-/* ── PM2.5 STATUS ───────────────────────────── */
-function Pm25Badge({ pm25 }: { pm25: number }) {
-  if (pm25 <= 12)
-    return <Badge className="rounded-full bg-emerald-100 text-emerald-700 hover:bg-emerald-100">Baik</Badge>;
-  if (pm25 <= 35.4)
-    return <Badge className="rounded-full bg-amber-100 text-amber-700 hover:bg-amber-100">Sedang</Badge>;
-  return <Badge className="rounded-full bg-rose-100 text-rose-700 hover:bg-rose-100">Buruk</Badge>;
-}
-
-/* ── CSV EXPORT ─────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────
+   CSV Export
+───────────────────────────────────────────────────────────── */
 function csvEscape(v: unknown) {
   const s = String(v ?? "");
   const safe = /^[=+\-@]/.test(s) ? `'${s}` : s;
@@ -180,56 +90,59 @@ function csvEscape(v: unknown) {
 
 function downloadCsv(filename: string, rows: (string | number)[][]) {
   const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
-  const a = Object.assign(document.createElement("a"), { href: url, download: filename });
+  const url = URL.createObjectURL(
+    new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }),
+  );
+  const a = Object.assign(document.createElement("a"), {
+    href: url,
+    download: filename,
+  });
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
 }
 
-/* ── MOCK DATA ──────────────────────────────── */
-function generateMockMeasurements(): Measurement[] {
-  let seed = 42;
-  const rand = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
-
-  const now = Date.now();
-  const start = now - 7 * 864e5;
-  const step = 30 * 60e3;
-  const pts: Measurement[] = [];
-
-  for (let t = start; t <= now; t += step) {
-    const h = new Date(t).getHours() + new Date(t).getMinutes() / 60;
-    const w1 = Math.sin((2 * Math.PI * h) / 24);
-    const w2 = Math.cos((2 * Math.PI * h) / 24);
-    pts.push({
-      timestamp: new Date(t).toISOString(),
-      pm25: Number(clamp(10 + Math.max(0, w1) * 10 + (rand() - 0.5) * 4, 2, 60).toFixed(1)),
-      temperature: Number(clamp(24 + w1 * 1.2 + (rand() - 0.5) * 0.8, 20, 30).toFixed(1)),
-      humidity: Math.round(clamp(58 + w2 * 6 + (rand() - 0.5) * 3, 35, 80)),
-      co2: Math.round(clamp(420 + Math.max(0, w1) * 80 + (rand() - 0.5) * 40, 380, 1200)),
-    });
-  }
-  return pts;
-}
-
-/* ── CHART CARD ─────────────────────────────── */
-function ChartCard({
-  icon, iconBox, title, sub, data, valueKey, color, latest,
-}: {
+/* ─────────────────────────────────────────────────────────────
+   Chart Card
+───────────────────────────────────────────────────────────── */
+interface ChartCardProps {
   icon: React.ReactNode;
   iconBox: string;
   title: string;
   sub: string;
-  data: Measurement[];
-  valueKey: keyof Pick<Measurement, "pm25" | "temperature" | "humidity" | "co2">;
+  data: { time: string; value: number }[];
   color: string;
-  latest: React.ReactNode;
-}) {
+  gradientId: string;
+  unit: string;
+  loading: boolean;
+  domain?: [
+    number | "auto" | "dataMin" | "dataMax",
+    number | "auto" | "dataMin" | "dataMax",
+  ];
+}
+
+function ChartCard({
+  icon,
+  iconBox,
+  title,
+  sub,
+  data,
+  color,
+  gradientId,
+  unit,
+  loading,
+  domain = ["auto", "auto"],
+}: ChartCardProps) {
   return (
     <Card className="rounded-2xl border border-slate-100 bg-white shadow-sm">
       <CardHeader className="flex-row items-center gap-3 space-y-0 pb-0">
-        <div className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", iconBox)}>
+        <div
+          className={cn(
+            "grid h-10 w-10 shrink-0 place-items-center rounded-xl",
+            iconBox,
+          )}
+        >
           {icon}
         </div>
         <div>
@@ -237,65 +150,194 @@ function ChartCard({
           <p className="text-xs text-slate-400">{sub}</p>
         </div>
       </CardHeader>
-      <CardContent className="pt-3 pb-4 px-5">
-        <LineChart data={data} valueKey={valueKey} color={color} />
-        <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-          <span>
-            Terbaru:{" "}
-            <span className="font-semibold text-slate-800">{latest}</span>
-          </span>
-          {valueKey === "pm25" && data.length > 0 && (
-            <Pm25Badge pm25={data[data.length - 1]?.pm25 ?? 0} />
-          )}
-        </div>
+
+      <CardContent className="px-4 pb-4 pt-3">
+        {loading ? (
+          <div className="grid h-44 place-items-center">
+            <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
+          </div>
+        ) : data.length === 0 ? (
+          <div className="grid h-44 place-items-center rounded-xl bg-slate-50 text-sm text-slate-400">
+            Tidak ada data pada range tanggal ini.
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={176}>
+            <AreaChart
+              data={data}
+              margin={{ top: 4, right: 8, left: -16, bottom: 0 }}
+            >
+              <defs>
+                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={color} stopOpacity={0.18} />
+                  <stop offset="95%" stopColor={color} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis
+                dataKey="time"
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                tickLine={false}
+                axisLine={false}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "#94a3b8" }}
+                tickLine={false}
+                axisLine={false}
+                domain={domain}
+                tickFormatter={(v) => `${v}`}
+              />
+              <Tooltip
+                contentStyle={{
+                  borderRadius: "12px",
+                  border: "1px solid #e2e8f0",
+                  boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+                  fontSize: "12px",
+                  padding: "8px 12px",
+                }}
+                formatter={(value: number) => [`${value} ${unit}`, title]}
+                labelStyle={{ color: "#64748b", marginBottom: "2px" }}
+              />
+              <Area
+                type="monotone"
+                dataKey="value"
+                stroke={color}
+                strokeWidth={2.5}
+                fill={`url(#${gradientId})`}
+                dot={false}
+                activeDot={{ r: 5, fill: color, strokeWidth: 0 }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+
+        {data.length > 0 && (
+          <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
+            <span>
+              Terbaru:{" "}
+              <span className="font-semibold text-slate-800">
+                {data[data.length - 1]?.value} {unit}
+              </span>
+            </span>
+            <span className="text-slate-400">{data.length} titik data</span>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
-/* ── MAIN ───────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────
+   Main Component
+───────────────────────────────────────────────────────────── */
 export default function HistorySection() {
-  const allData = React.useMemo(() => generateMockMeasurements(), []);
+  const { history, loading, error } = useRealtimeSensor(200);
 
+  /* Date filter state */
   const defaultEnd = React.useMemo(() => new Date(), []);
-  const defaultStart = React.useMemo(() => new Date(Date.now() - 2 * 864e5), []);
+  const defaultStart = React.useMemo(
+    () => new Date(Date.now() - 2 * 86_400_000),
+    [],
+  );
 
-  const [startDate, setStartDate] = React.useState(toDateInputValue(defaultStart));
+  const [startDate, setStartDate] = React.useState(
+    toDateInputValue(defaultStart),
+  );
   const [endDate, setEndDate] = React.useState(toDateInputValue(defaultEnd));
 
-  const startRange = React.useMemo(() => (startDate ? parseDateInputToRangeStart(startDate) : null), [startDate]);
-  const endRange = React.useMemo(() => (endDate ? parseDateInputToRangeEnd(endDate) : null), [endDate]);
+  const startRange = React.useMemo(
+    () => (startDate ? parseDateInputToRangeStart(startDate) : null),
+    [startDate],
+  );
+  const endRange = React.useMemo(
+    () => (endDate ? parseDateInputToRangeEnd(endDate) : null),
+    [endDate],
+  );
 
-  const rangeInvalid = React.useMemo(() =>
-    !!(startRange && endRange && endRange < startRange), [startRange, endRange]);
+  const rangeInvalid = React.useMemo(
+    () => !!(startRange && endRange && endRange < startRange),
+    [startRange, endRange],
+  );
 
-  const filtered = React.useMemo(() => {
-    if (!startRange || !endRange) return allData;
-    if (rangeInvalid) return [];
-    const s = startRange.getTime(), e = endRange.getTime();
-    return allData.filter((d) => { const t = new Date(d.timestamp).getTime(); return t >= s && t <= e; });
-  }, [allData, startRange, endRange, rangeInvalid]);
+  /* Filter history by date range */
+  const filtered = React.useMemo<SensorReading[]>(() => {
+    if (!startRange || !endRange || rangeInvalid) return [];
+    const s = startRange.getTime();
+    const e = endRange.getTime();
+    return history.filter((d) => {
+      const t =
+        typeof d.timestamp === "number"
+          ? d.timestamp
+          : new Date(d.timestamp).getTime();
+      return t >= s && t <= e;
+    });
+  }, [history, startRange, endRange, rangeInvalid]);
 
-  const recent = React.useMemo(() =>
-    [...filtered].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 12),
-    [filtered]);
+  /* Most-recent 12 rows for the table */
+  const recent = React.useMemo(
+    () =>
+      [...filtered]
+        .sort((a, b) => {
+          const ta =
+            typeof a.timestamp === "number"
+              ? a.timestamp
+              : new Date(a.timestamp).getTime();
+          const tb =
+            typeof b.timestamp === "number"
+              ? b.timestamp
+              : new Date(b.timestamp).getTime();
+          return tb - ta;
+        })
+        .slice(0, 12),
+    [filtered],
+  );
 
+  /* Summary averages */
   const summary = React.useMemo(() => {
-    if (!filtered.length) return { pm25: 0, temp: 0, hum: 0, co2: 0 };
-    const sum = filtered.reduce((a, d) => ({ pm25: a.pm25 + d.pm25, temp: a.temp + d.temperature, hum: a.hum + d.humidity, co2: a.co2 + d.co2 }), { pm25: 0, temp: 0, hum: 0, co2: 0 });
+    if (!filtered.length) return null;
     const n = filtered.length;
-    return { pm25: sum.pm25 / n, temp: sum.temp / n, hum: sum.hum / n, co2: sum.co2 / n };
+    return {
+      suhu: filtered.reduce((a, d) => a + d.suhu, 0) / n,
+      kelembaban: filtered.reduce((a, d) => a + d.kelembaban, 0) / n,
+    };
   }, [filtered]);
 
+  /* Chart data */
+  const suhuChartData = React.useMemo(
+    () =>
+      filtered.map((d) => ({
+        time: formatTimeShort(d.timestamp),
+        value: d.suhu,
+      })),
+    [filtered],
+  );
+
+  const kelembabanChartData = React.useMemo(
+    () =>
+      filtered.map((d) => ({
+        time: formatTimeShort(d.timestamp),
+        value: d.kelembaban,
+      })),
+    [filtered],
+  );
+
+  /* ── Render ── */
   return (
     <div className="space-y-12">
-
       {/* ── HEADER ── */}
       <section className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Data History</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">
+            Data History
+          </h1>
           <p className="mt-1 text-sm text-slate-500">
             Filter data berdasarkan tanggal, lihat tren sensor, dan export CSV.
+            {loading && (
+              <span className="ml-2 inline-flex items-center gap-1 text-sky-500">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Memuat data Firebase…
+              </span>
+            )}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -303,7 +345,10 @@ export default function HistorySection() {
             variant="outline"
             size="sm"
             className="rounded-full"
-            onClick={() => { setStartDate(toDateInputValue(defaultStart)); setEndDate(toDateInputValue(defaultEnd)); }}
+            onClick={() => {
+              setStartDate(toDateInputValue(defaultStart));
+              setEndDate(toDateInputValue(defaultEnd));
+            }}
           >
             <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
             Reset
@@ -311,11 +356,17 @@ export default function HistorySection() {
           <Button
             size="sm"
             className="rounded-full bg-sky-600 text-white hover:bg-sky-700"
-            onClick={() => downloadCsv(`aerosense_${startDate}_to_${endDate}.csv`, [
-              ["Timestamp", "PM2.5 (µg/m³)", "Temperature (°C)", "Humidity (%)", "CO2 (ppm)"],
-              ...filtered.map((d) => [formatDateTimeID(d.timestamp), d.pm25, d.temperature, d.humidity, d.co2]),
-            ])}
             disabled={!filtered.length || rangeInvalid}
+            onClick={() =>
+              downloadCsv(`aerosense_${startDate}_to_${endDate}.csv`, [
+                ["Timestamp", "Suhu (°C)", "Kelembaban (%)"],
+                ...filtered.map((d) => [
+                  formatDateTimeID(d.timestamp),
+                  d.suhu,
+                  d.kelembaban,
+                ]),
+              ])
+            }
           >
             <Download className="mr-1.5 h-3.5 w-3.5" />
             Export CSV
@@ -323,7 +374,18 @@ export default function HistorySection() {
         </div>
       </section>
 
-      {/* ── FILTER ── */}
+      {/* ── ERROR BANNER ── */}
+      {error && (
+        <div className="flex items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">
+          <WifiOff className="h-5 w-5 shrink-0 text-rose-500" />
+          <div>
+            <span className="font-semibold">Gagal memuat data: </span>
+            {error}
+          </div>
+        </div>
+      )}
+
+      {/* ── DATE FILTER ── */}
       <Card className="rounded-2xl border border-slate-100 bg-white shadow-sm">
         <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
           <CardTitle className="flex items-center gap-2 text-base font-semibold">
@@ -337,13 +399,32 @@ export default function HistorySection() {
 
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-3">
+            {/* From */}
             <div className="space-y-1.5">
-              <Label htmlFor="startDate" className="text-xs text-slate-500">Dari</Label>
-              <Input id="startDate" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="rounded-xl" />
+              <Label htmlFor="startDate" className="text-xs text-slate-500">
+                Dari
+              </Label>
+              <Input
+                id="startDate"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="rounded-xl"
+              />
             </div>
+
+            {/* To */}
             <div className="space-y-1.5">
-              <Label htmlFor="endDate" className="text-xs text-slate-500">Sampai</Label>
-              <Input id="endDate" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="rounded-xl" />
+              <Label htmlFor="endDate" className="text-xs text-slate-500">
+                Sampai
+              </Label>
+              <Input
+                id="endDate"
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="rounded-xl"
+              />
             </div>
 
             {/* Summary */}
@@ -351,25 +432,58 @@ export default function HistorySection() {
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
                 Rata-rata periode
               </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-slate-700">
-                {[
-                  ["PM2.5", filtered.length ? `${summary.pm25.toFixed(1)} µg/m³` : "—"],
-                  ["Suhu", filtered.length ? `${summary.temp.toFixed(1)} °C` : "—"],
-                  ["Kelembaban", filtered.length ? `${summary.hum.toFixed(0)}%` : "—"],
-                  ["CO2", filtered.length ? `${summary.co2.toFixed(0)} ppm` : "—"],
-                ].map(([k, v]) => (
-                  <React.Fragment key={k}>
-                    <span className="text-xs text-slate-500">{k}</span>
-                    <span className="text-right text-xs font-medium">{v}</span>
-                  </React.Fragment>
-                ))}
-              </div>
+              {loading ? (
+                <div className="flex items-center gap-2 text-slate-400">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-xs">Memuat…</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-slate-700">
+                  {[
+                    ["Suhu", summary ? `${summary.suhu.toFixed(1)} °C` : "—"],
+                    [
+                      "Kelembaban",
+                      summary ? `${summary.kelembaban.toFixed(0)}%` : "—",
+                    ],
+                    [
+                      "Total Data",
+                      filtered.length ? `${filtered.length} titik` : "—",
+                    ],
+                    [
+                      "Sensor",
+                      <span
+                        key="live"
+                        className="inline-flex items-center gap-1 text-emerald-600"
+                      >
+                        <span className="h-1 w-1 animate-pulse rounded-full bg-emerald-500" />
+                        DHT-22 Live
+                      </span>,
+                    ],
+                  ].map(([k, v]) => (
+                    <React.Fragment key={String(k)}>
+                      <span className="text-xs text-slate-500">{k}</span>
+                      <span className="text-right text-xs font-medium">
+                        {v}
+                      </span>
+                    </React.Fragment>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
           {rangeInvalid && (
             <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
-              Range tanggal tidak valid — <b>Sampai</b> lebih kecil dari <b>Dari</b>.
+              Range tanggal tidak valid — <b>Sampai</b> lebih kecil dari{" "}
+              <b>Dari</b>.
+            </div>
+          )}
+
+          {!loading && history.length === 0 && !error && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              Belum ada data history di Firebase. Pastikan ESP32 sudah menulis
+              ke{" "}
+              <code className="font-mono font-semibold">/sensor/history</code>.
             </div>
           )}
         </CardContent>
@@ -380,44 +494,28 @@ export default function HistorySection() {
         <h2 className="text-xl font-semibold tracking-tight">Charts</h2>
         <div className="grid gap-5 lg:grid-cols-2">
           <ChartCard
-            icon={<Wind className="h-5 w-5" />}
-            iconBox="bg-cyan-100 text-cyan-700"
-            title="PM2.5 Levels"
-            sub="µg/m³ — filtered range"
-            data={filtered}
-            valueKey="pm25"
-            color="text-cyan-500"
-            latest={`${recent[0]?.pm25 ?? "—"} µg/m³`}
-          />
-          <ChartCard
             icon={<Thermometer className="h-5 w-5" />}
             iconBox="bg-sky-100 text-sky-700"
-            title="Temperature"
+            title="Suhu"
             sub="Nilai dalam °C"
-            data={filtered}
-            valueKey="temperature"
-            color="text-sky-500"
-            latest={`${recent[0]?.temperature ?? "—"} °C`}
+            data={suhuChartData}
+            color="#0ea5e9"
+            gradientId="grad-suhu"
+            unit="°C"
+            loading={loading}
+            domain={[15, 35]}
           />
           <ChartCard
             icon={<Droplets className="h-5 w-5" />}
             iconBox="bg-blue-100 text-blue-700"
-            title="Humidity"
+            title="Kelembaban"
             sub="Relative Humidity (%)"
-            data={filtered}
-            valueKey="humidity"
-            color="text-blue-500"
-            latest={`${recent[0]?.humidity ?? "—"}%`}
-          />
-          <ChartCard
-            icon={<Activity className="h-5 w-5" />}
-            iconBox="bg-emerald-100 text-emerald-700"
-            title="CO2 Levels"
-            sub="Nilai dalam ppm"
-            data={filtered}
-            valueKey="co2"
-            color="text-emerald-500"
-            latest={`${recent[0]?.co2 ?? "—"} ppm`}
+            data={kelembabanChartData}
+            color="#3b82f6"
+            gradientId="grad-kelembaban"
+            unit="%"
+            loading={loading}
+            domain={[0, 100]}
           />
         </div>
       </section>
@@ -425,7 +523,9 @@ export default function HistorySection() {
       {/* ── TABLE ── */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold tracking-tight">Recent Measurements</h2>
+          <h2 className="text-xl font-semibold tracking-tight">
+            Recent Measurements
+          </h2>
           <Badge variant="secondary" className="rounded-full text-xs">
             {recent.length} terakhir
           </Badge>
@@ -437,40 +537,81 @@ export default function HistorySection() {
               <Table>
                 <TableHeader>
                   <TableRow className="border-slate-100 bg-slate-50/70 hover:bg-slate-50/70">
-                    <TableHead className="rounded-tl-2xl pl-6 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Waktu
-                    </TableHead>
-                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-slate-500">PM2.5</TableHead>
-                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-slate-500">Suhu</TableHead>
-                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-slate-500">Kelembaban</TableHead>
-                    <TableHead className="text-xs font-semibold uppercase tracking-wide text-slate-500">CO2</TableHead>
-                    <TableHead className="rounded-tr-2xl pr-6 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Status
-                    </TableHead>
+                    {[
+                      "Waktu",
+                      "Suhu (°C)",
+                      "Kelembaban (%)",
+                      "Status Suhu",
+                    ].map((h, i, arr) => (
+                      <TableHead
+                        key={h}
+                        className={cn(
+                          "text-xs font-semibold uppercase tracking-wide text-slate-500",
+                          i === 0 && "pl-6",
+                          i === arr.length - 1 && "pr-6",
+                        )}
+                      >
+                        {h}
+                      </TableHead>
+                    ))}
                   </TableRow>
                 </TableHeader>
+
                 <TableBody>
-                  {recent.length === 0 ? (
+                  {loading ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-12 text-center text-sm text-slate-400">
+                      <TableCell
+                        colSpan={4}
+                        className="py-12 text-center text-sm text-slate-400"
+                      >
+                        <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-slate-300" />
+                        Memuat data dari Firebase…
+                      </TableCell>
+                    </TableRow>
+                  ) : recent.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={4}
+                        className="py-12 text-center text-sm text-slate-400"
+                      >
                         Tidak ada data untuk ditampilkan.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    recent.map((d) => (
-                      <TableRow key={d.timestamp} className="border-slate-50 hover:bg-slate-50/60">
-                        <TableCell className="pl-6 text-sm font-medium text-slate-700">
-                          {formatDateTimeID(d.timestamp)}
-                        </TableCell>
-                        <TableCell className="text-sm tabular-nums">{d.pm25} µg/m³</TableCell>
-                        <TableCell className="text-sm tabular-nums">{d.temperature} °C</TableCell>
-                        <TableCell className="text-sm tabular-nums">{d.humidity}%</TableCell>
-                        <TableCell className="text-sm tabular-nums">{d.co2} ppm</TableCell>
-                        <TableCell className="pr-6">
-                          <Pm25Badge pm25={d.pm25} />
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    recent.map((d) => {
+                      const suhuOk = d.suhu >= 18 && d.suhu <= 28;
+                      const kelOk = d.kelembaban >= 30 && d.kelembaban <= 70;
+                      const isOk = suhuOk && kelOk;
+
+                      return (
+                        <TableRow
+                          key={String(d.timestamp)}
+                          className="border-slate-50 hover:bg-slate-50/60"
+                        >
+                          <TableCell className="pl-6 text-sm font-medium text-slate-700">
+                            {formatDateTimeID(d.timestamp)}
+                          </TableCell>
+                          <TableCell className="text-sm tabular-nums">
+                            {d.suhu.toFixed(1)} °C
+                          </TableCell>
+                          <TableCell className="text-sm tabular-nums">
+                            {d.kelembaban.toFixed(0)}%
+                          </TableCell>
+                          <TableCell className="pr-6">
+                            <Badge
+                              className={cn(
+                                "rounded-full",
+                                isOk
+                                  ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100"
+                                  : "bg-amber-100 text-amber-700 hover:bg-amber-100",
+                              )}
+                            >
+                              {isOk ? "Normal" : "Perhatian"}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>

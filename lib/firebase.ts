@@ -1,17 +1,23 @@
-import { initializeApp, FirebaseApp } from "firebase/app";
-import { getFirestore, Firestore } from "firebase/firestore";
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getDatabase } from "firebase/database"; // <-- TAMBAHKAN INI
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
 
+// Your web app's Firebase configuration
 const firebaseConfig = {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  apiKey: "AIzaSyBLY2t8iAVK8P6ehseP02NbjWkkHXfvywA",
+  authDomain: "aero-sense-21921.firebaseapp.com",
+  databaseURL:
+    "https://aero-sense-21921-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "aero-sense-21921",
+  storageBucket: "aero-sense-21921.firebasestorage.app",
+  messagingSenderId: "531339053412",
+  appId: "1:531339053412:web:c9c872c1d017b7aba41271",
 };
 
-const app: FirebaseApp = initializeApp(firebaseConfig);
-const db: Firestore = getFirestore(app);
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const database = getDatabase(app); // <-- TAMBAHKAN INI
 
-export { db };
+export { database }; // <-- TAMBAHKAN INI
