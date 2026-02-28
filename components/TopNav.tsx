@@ -3,7 +3,6 @@
 import * as React from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Button } from "@/components/ui/button";
 import { Info, History, Wind } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -13,7 +12,6 @@ const TABS: Tab[] = ["home", "history", "about"];
 function useActiveSection(ids: Tab[]) {
   const [active, setActive] = React.useState<Tab>("home");
 
-  // initial: if user opens /#about etc.
   React.useEffect(() => {
     const hash = window.location.hash.replace("#", "") as Tab;
     if (ids.includes(hash)) setActive(hash);
@@ -30,13 +28,13 @@ function useActiveSection(ids: Tab[]) {
       (entries) => {
         const visible = entries
           .filter((e) => e.isIntersecting)
-          .sort((a, b) => (b.intersectionRatio ?? 0) - (a.intersectionRatio ?? 0))[0];
+          .sort(
+            (a, b) => (b.intersectionRatio ?? 0) - (a.intersectionRatio ?? 0)
+          )[0];
 
         if (visible?.target?.id) {
           const id = visible.target.id as Tab;
           setActive(id);
-
-          // keep URL hash synced (optional, but feels like GitHub)
           history.replaceState(null, "", `#${id}`);
         }
       },
@@ -56,33 +54,26 @@ function useActiveSection(ids: Tab[]) {
 export default function TopNav() {
   const activeTab = useActiveSection(TABS);
 
-  const activeBtn = "rounded-full bg-white/95 px-4 text-sky-700 hover:bg-white";
-  const ghostBtn =
-    "rounded-full px-4 text-white hover:bg-white/10 hover:text-white";
-
-  const NavBtn = ({
-    id,
-    label,
-    icon,
-  }: {
-    id: Tab;
-    label: string;
-    icon: React.ReactNode;
-  }) => (
-    <Button asChild size="sm" className={cn(activeTab === id ? activeBtn : ghostBtn)}>
-      <a href={`#${id}`} className="flex items-center gap-2">
-        {icon}
-        {label}
-      </a>
-    </Button>
-  );
+  const NAV_ITEMS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: "home", label: "Home", icon: <Wind className="h-4 w-4" /> },
+    {
+      id: "history",
+      label: "Data History",
+      icon: <History className="h-4 w-4" />,
+    },
+    { id: "about", label: "About Us", icon: <Info className="h-4 w-4" /> },
+  ];
 
   return (
-    <header className="sticky top-0 z-50 w-full bg-gradient-to-r from-cyan-600 to-sky-600 text-white shadow">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        {/* Brand */}
-        <Link href="/" className="flex items-center gap-3">
-          <div className="relative h-10 w-10 overflow-hidden rounded-xl bg-white/95 shadow-sm">
+    <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-gradient-to-r from-cyan-700 to-sky-600 shadow-[0_2px_16px_rgba(0,0,0,0.15)]">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-2.5">
+
+        {/* ── Brand ── */}
+        <Link
+          href="/"
+          className="group flex items-center gap-3 rounded-xl px-1 py-1 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+        >
+          <div className="relative h-10 w-10 overflow-hidden rounded-xl bg-white/95 shadow-sm ring-1 ring-white/20 transition-transform group-hover:scale-105">
             <Image
               src="/images/AERO_SENSEE.jpg"
               alt="AeroSense Logo"
@@ -93,24 +84,32 @@ export default function TopNav() {
           </div>
 
           <div className="leading-tight">
-            <div className="text-xl font-semibold tracking-tight">AeroSense</div>
-            <div className="text-xs text-white/80">IoT Air Quality Monitor</div>
+            <div className="text-[1.05rem] font-semibold tracking-tight text-white">
+              AeroSense
+            </div>
+            <div className="text-[0.7rem] font-medium text-white/70">
+              IoT Air Quality Monitor
+            </div>
           </div>
         </Link>
 
-        {/* Nav */}
-        <nav className="flex items-center gap-2">
-          <NavBtn id="home" label="Home" icon={<Wind className="h-4 w-4" />} />
-          <NavBtn
-            id="history"
-            label="Data History"
-            icon={<History className="h-4 w-4" />}
-          />
-          <NavBtn
-            id="about"
-            label="About Us"
-            icon={<Info className="h-4 w-4" />}
-          />
+        {/* ── Nav ── */}
+        <nav className="flex items-center gap-1">
+          {NAV_ITEMS.map(({ id, label, icon }) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className={cn(
+                "flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60",
+                activeTab === id
+                  ? "bg-white/95 text-sky-700 shadow-sm"
+                  : "text-white/90 hover:bg-white/15 hover:text-white"
+              )}
+            >
+              {icon}
+              <span className="hidden sm:inline">{label}</span>
+            </a>
+          ))}
         </nav>
       </div>
     </header>
